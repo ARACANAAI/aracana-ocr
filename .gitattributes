@@ -1,0 +1,11 @@
+# Fins de ligne normalisées en LF dans le dépôt.
+#
+# Sans cela, un poste Windows livre des CRLF, et le shell embarqué dans
+# .github/workflows/publier.yml s'exécute sur un runner Linux avec des
+# retours chariot en fin de ligne — les scripts échouent sur des erreurs
+# incompréhensibles du type « \r: command not found ».
+* text=auto eol=lf
+
+*.png binary
+*.pdf binary
+*.jpg binary

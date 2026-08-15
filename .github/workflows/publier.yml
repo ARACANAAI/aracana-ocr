@@ -1,0 +1,156 @@
+# Publication par « Trusted Publishing » — aucun jeton nulle part.
+#
+# POURQUOI CETTE VOIE PLUTÔT QU'UN JETON D'API
+#   Un jeton PyPI est un secret de longue durée, copié dans les réglages du
+#   dépôt, visible de quiconque a les droits d'administration, et valable
+#   jusqu'à révocation manuelle. Le Trusted Publishing le remplace par un
+#   jeton OIDC à usage unique, émis par GitHub pour CE dépôt, CE workflow et
+#   CET environnement, valable quelques minutes.
+#
+#   Rien à stocker, rien à faire fuiter, rien à faire tourner.
+#
+# CE QU'IL FAUT DÉCLARER UNE FOIS, CÔTÉ PyPI
+#   test.pypi.org puis pypi.org → Your projects → Publishing → Add a new
+#   pending publisher :
+#       PyPI Project Name : aracana-ocr
+#       Owner             : ARACANAAI
+#       Repository name   : aracana-ocr
+#       Workflow name     : publier.yml
+#       Environment name  : testpypi   (puis pypi)
+#
+#   « Pending publisher » signifie que le projet n'a pas encore besoin
+#   d'exister : le premier envoi le crée.
+
+name: Publier
+
+on:
+  push:
+    tags: ["v*"]          # v0.1.0 déclenche TestPyPI puis PyPI
+  workflow_dispatch:      # essai manuel, TestPyPI seulement
+
+jobs:
+  construire:
+    name: Construire et vérifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Vérifier que la version du tag correspond au paquet
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # Publier un tag v0.2.0 avec un pyproject à 0.1.0 produirait une
+          # version PyPI qui ne correspond à aucun commit. Sur un dépôt où
+          # rien ne se reprend, c'est irréparable.
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          echo "tag=$TAG  pyproject=$PKG"
+          [ "$TAG" = "$PKG" ] || { echo "::error::Le tag et pyproject.toml divergent."; exit 1; }
+
+      - name: Suites de tests
+        run: |
+          # Le paquet n'a aucune dépendance obligatoire : les suites du cœur
+          # doivent passer sur une installation nue. Si elles échouent ici,
+          # c'est qu'une dépendance s'est glissée sans être déclarée.
+          pip install -e ".[pdf]"
+          for t in tests/test_*.py; do
+            echo "── $t"
+            python "$t" || exit 1
+          done
+
+      - name: Construire
+        run: |
+          pip install build
+          python -m build --outdir dist .
+
+      - name: Contrôler les artefacts
+        run: |
+          pip install twine
+          twine check dist/*
+          # Une roue qui ne s'installe pas dans un environnement vierge est
+          # une roue cassée, et on ne le découvre qu'après publication.
+          python -m venv /tmp/vierge
+          /tmp/vierge/bin/pip install dist/*.whl
+          /tmp/vierge/bin/python -c "import aracana; print(aracana.__version__)"
+          /tmp/vierge/bin/aracana pro
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paquets
+          path: dist/
+
+  testpypi:
+    name: TestPyPI
+    needs: construire
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/aracana-ocr
+    permissions:
+      id-token: write        # le jeton OIDC ; aucun secret de dépôt
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: paquets
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  verifier_testpypi:
+    name: Installer depuis TestPyPI
+    needs: testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer et exécuter
+        run: |
+          # L'étape qui vaut le détour par TestPyPI : on installe le paquet
+          # TEL QUE PUBLIÉ, depuis l'index, comme le fera un utilisateur.
+          # Une métadonnée fautive ou un fichier manquant se voit ici, où
+          # l'erreur est encore gratuite.
+          # Sur un essai manuel il n'y a pas de tag : `GITHUB_REF_NAME` vaut
+          # le nom de la branche, et « aracana-ocr==main » échouerait
+          # systématiquement. On n'épingle la version que sur un tag.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            CIBLE="aracana-ocr==${GITHUB_REF_NAME#v}"
+          else
+            CIBLE="aracana-ocr"
+          fi
+          echo "installation de $CIBLE"
+          for i in 1 2 3 4 5 6; do
+            pip install --index-url https://test.pypi.org/simple/ \
+                        --extra-index-url https://pypi.org/simple/ \
+                        "$CIBLE" && break
+            echo "index pas encore à jour, nouvelle tentative…"; sleep 20
+          done
+          python -c "
+          import aracana
+          from aracana import decider, Client, JournalAudit, plugins, pro
+          from aracana.riskcov import courbe
+          from aracana.agent import reparer
+          print('aracana-ocr', aracana.__version__, 'installé depuis TestPyPI')
+          "
+          aracana --sans-couleur pro
+
+  pypi:
+    name: PyPI
+    needs: verifier_testpypi
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi                 # protégez-le par une revue manuelle :
+      url: https://pypi.org/p/aracana-ocr   # Settings → Environments → Required reviewers
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: paquets
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

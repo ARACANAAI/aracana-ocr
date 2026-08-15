@@ -1,0 +1,105 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# Nom de DISTRIBUTION `aracana-ocr`, nom d'IMPORT `aracana`.
+# Le premier est ce qu'on cherche sur PyPI et doit dire de quoi il s'agit ;
+# le second est ce qu'on tape vingt fois par fichier et doit rester court.
+# Convention courante — scikit-learn/sklearn, pillow/PIL, beautifulsoup4/bs4.
+name = "aracana-ocr"
+version = "0.1.0"
+description = "Lecture, contrôle et décision sur documents européens — extraction vérifiée, agnostique de l'analyseur."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "ARACANA AI", email = "contact@aracana.ai" }]
+keywords = [
+    "ocr", "document-ai", "invoice", "factur-x", "zugferd", "en16931",
+    "e-invoicing", "vat", "compliance", "eu-ai-act", "selective-prediction",
+    "verification", "audit", "fec",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing",
+    "Typing :: Typed",
+]
+
+# AUCUNE dépendance obligatoire. C'est une décision, pas un oubli.
+#
+# Le cœur — triage, extraction, vérificateurs, politique, décision, export FEC,
+# mesure risque–couverture — n'utilise que la bibliothèque standard. Un XML
+# structuré, une réconciliation Factur-X et tous les contrôles arithmétiques
+# tournent sans rien installer d'autre, sans GPU et hors ligne.
+#
+# Conséquence directe : `pip install aracana` prend deux secondes et ne peut
+# pas échouer sur une roue à compiler. C'est ce qui décide de l'adoption.
+dependencies = []
+
+[project.optional-dependencies]
+pdf = ["pypdf>=4", "pypdfium2>=4"]            # pièces jointes et rastérisation
+docling = ["docling>=2"]
+marker = ["marker-pdf>=1"]
+mineru = ["magic-pdf>=1"]
+tesseract = ["pytesseract>=0.3", "pillow>=10"]
+# Le SDK (aracana.client) n'a AUCUNE dépendance : bibliothèque standard.
+# Cet extra ne sert qu'aux appelants qui veulent httpx pour leur propre code.
+api = ["httpx>=0.27"]
+mcp = ["mcp>=1.2", "httpx>=0.27"]      # serveur MCP intégré : aracana.mcp_server
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+all = ["aracana-ocr[pdf,mcp]"]
+
+[project.urls]
+Homepage = "https://aracana.ai/framework"
+Documentation = "https://aracana.ai/framework"
+Repository = "https://github.com/ARACANAAI/aracana-ocr"
+Issues = "https://github.com/ARACANAAI/aracana-ocr/issues"
+"Fondation scientifique" = "https://aracana.ai/framework#recherche"
+
+[project.scripts]
+aracana = "aracana.cli:main"
+aracana-mcp = "aracana.mcp_server:main"
+
+# Les points d'insertion offerts aux paquets tiers. Un adaptateur publié
+# devient disponible dès `pip install`, sans une ligne de code chez
+# l'utilisateur. Voir aracana/plugins.py.
+[project.entry-points."aracana.parsers"]
+# aracana-docling déclare : docling = "aracana_docling:Parser"
+
+[project.entry-points."aracana.verifiers"]
+# un pack pays tiers déclare : es = "aracana_es:verificateurs"
+
+[project.entry-points."aracana.sinks"]
+# un connecteur déclare : pennylane = "aracana_pennylane:Sink"
+
+[project.entry-points."aracana.tools"]
+# un outil de relecture déclare : crop = "mon_paquet:Recadrage"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aracana"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/aracana", "README.md", "LICENSE", "RECHERCHE.md"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+ignore_missing_imports = true

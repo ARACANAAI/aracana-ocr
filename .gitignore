@@ -1,0 +1,23 @@
+# Artefacts de construction
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Relevés d'expérience : ils sont reproductibles par le harnais, et un relevé
+# collecté sur des documents de client n'a rien à faire dans un dépôt public.
+experiences/releves/
+experiences/*.json
+
+# Environnements et secrets
+.env
+.env.*
+!.env.example
+
+# Éditeurs
+.vscode/
+.idea/
+.DS_Store
