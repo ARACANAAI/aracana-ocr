@@ -89,10 +89,37 @@ check("UBL -> STRUCTURE", d.route == D.Route.STRUCTURE, d.route)
 check("UBL n'appelle pas le modele", d.economise_gpu)
 check("famille ubl", d.profil == "ubl", d.profil)
 
-import io
-from PIL import Image
-b = io.BytesIO(); Image.new("RGB",(800,1000),"white").save(b,"PNG")
-d = D.diagnostiquer(b.getvalue())
+import struct
+import zlib
+
+
+def png_blanc(largeur: int = 800, hauteur: int = 1000) -> bytes:
+    """Un PNG blanc valide, construit sans Pillow.
+
+    Ce test importait `PIL` pour fabriquer quatre lignes de fixture. Or la
+    suite doit tourner sur une installation NUE — le paquet n'a aucune
+    dépendance obligatoire, ses tests non plus — et cet import a fait
+    échouer l'intégration continue avant même la construction du paquet.
+
+    Le triage reconnaît le format à sa signature et ne lit aucune dimension
+    (`detect.py`), mais on produit tout de même un fichier réellement
+    décodable : une fixture qui ne serait valide que pour le contrôle qu'on
+    écrit aujourd'hui cesse de prouver quoi que ce soit demain.
+    """
+    def bloc(nom: bytes, donnees: bytes) -> bytes:
+        corps = nom + donnees
+        return (struct.pack(">I", len(donnees)) + corps
+                + struct.pack(">I", zlib.crc32(corps)))
+
+    entete = struct.pack(">IIBBBBB", largeur, hauteur, 8, 2, 0, 0, 0)  # RVB 8 bits
+    pixels = b"".join(b"\x00" + b"\xff" * (largeur * 3) for _ in range(hauteur))
+    return (b"\x89PNG\r\n\x1a\n"
+            + bloc(b"IHDR", entete)
+            + bloc(b"IDAT", zlib.compress(pixels))
+            + bloc(b"IEND", b""))
+
+
+d = D.diagnostiquer(png_blanc())
 check("PNG -> IMAGE", d.route == D.Route.IMAGE)
 check("PNG appelle le modele", d.besoin_modele)
 
