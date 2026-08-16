@@ -20,6 +20,14 @@
 #
 #   « Pending publisher » signifie que le projet n'a pas encore besoin
 #   d'exister : le premier envoi le crée.
+#
+# SI VOUS N'AVEZ PAS DE COMPTE TestPyPI
+#   TestPyPI est un filet, pas un passage obligé. Réglez la variable de dépôt
+#   SANS_TESTPYPI à « true » (Settings → Secrets and variables → Actions →
+#   Variables) : l'étape est sautée et la publication sur PyPI continue.
+#
+#   Un saut n'est pas un échec — mais un ÉCHEC de TestPyPI, lui, arrête tout.
+#   Retirez la variable dès que le compte existe : le filet reprend son rôle.
 
 name: Publier
 
@@ -76,6 +84,15 @@ jobs:
           /tmp/vierge/bin/pip install dist/*.whl
           /tmp/vierge/bin/python -c "import aracana; print(aracana.__version__)"
           /tmp/vierge/bin/aracana pro
+          # Et l'archive source, séparément. `pip install` depuis un index
+          # préfère la roue : un fichier absent de la sdist ne se voit donc
+          # jamais, jusqu'au jour où quelqu'un construit depuis les sources.
+          # Ce contrôle ne dépend d'aucun compte TestPyPI — c'est ce qui rend
+          # le filet TestPyPI facultatif sans rendre la publication aveugle.
+          python -m venv /tmp/vierge_sdist
+          /tmp/vierge_sdist/bin/pip install --no-binary :all: dist/*.tar.gz
+          /tmp/vierge_sdist/bin/python -c "import aracana; print(aracana.__version__)"
+          /tmp/vierge_sdist/bin/aracana --sans-couleur pro
 
       - uses: actions/upload-artifact@v4
         with:
@@ -85,6 +102,9 @@ jobs:
   testpypi:
     name: TestPyPI
     needs: construire
+    # Sauté sur demande explicite. `verifier_testpypi` en dépend et se saute
+    # donc avec lui, sans condition à répéter.
+    if: vars.SANS_TESTPYPI != 'true'
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -99,6 +119,15 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # La répétition à blanc (workflow_dispatch) publie déjà 0.1.0 sur
+          # TestPyPI. L'envoi suivant, celui de l'étiquette, retomberait sur
+          # « File already exists » et bloquerait la chaîne AVANT PyPI : la
+          # répétition sabordait la vraie publication.
+          #
+          # On tolère donc le doublon ICI, et seulement ici. Sur PyPI il doit
+          # rester une erreur franche — un doublon silencieusement ignoré
+          # laisse croire qu'on a publié alors qu'on n'a rien envoyé.
+          skip-existing: true
 
   verifier_testpypi:
     name: Installer depuis TestPyPI
@@ -140,8 +169,18 @@ jobs:
 
   pypi:
     name: PyPI
-    needs: verifier_testpypi
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [construire, verifier_testpypi]
+    # Par défaut, une étape sautée saute aussi celles qui en dépendent : sans
+    # `always()`, désactiver TestPyPI désactiverait silencieusement PyPI.
+    # D'où la distinction explicite entre « sauté » et « échoué » :
+    #   construire         doit avoir RÉUSSI  — sinon il n'y a pas d'artefact
+    #   verifier_testpypi  ne doit pas avoir ÉCHOUÉ — « skipped » est accepté
+    if: >-
+      always()
+      && startsWith(github.ref, 'refs/tags/v')
+      && needs.construire.result == 'success'
+      && needs.verifier_testpypi.result != 'failure'
+      && needs.verifier_testpypi.result != 'cancelled'
     runs-on: ubuntu-latest
     environment:
       name: pypi                 # protégez-le par une revue manuelle :
